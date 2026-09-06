@@ -3,12 +3,13 @@
      drafts  -> chrome.storage.session  (in-memory, never written to disk;
                                           gone on browser close or page refresh)
      orders  -> IndexedDB               (only after Create Shipment / Confirm
-                                          Booking, stamped with captured_at)
+                                          Booking, stamped with captured_at;
+                                          unique on awb_no — same AWB upserts)
    Rows are deleted on export — the downloaded spreadsheet is the record. */
 
 const DEFAULT_SETTINGS = { enabled: true };
 const DB_NAME = 'hisaabsathi-db';
-const DB_VERSION = 4;
+const DB_VERSION = 5;
 const DRAFT_NS = 'draft:';
 
 function supported(url = '') {
@@ -27,17 +28,44 @@ function sessionKey(tabId, suffix) { return `${String(tabId)}::${String(suffix |
 function openDB() {
   return new Promise((resolve, reject) => {
     const r = indexedDB.open(DB_NAME, DB_VERSION);
-    r.onupgradeneeded = () => {
+    r.onupgradeneeded = (event) => {
       const db = r.result;
+      const tx = r.transaction;
+      let orders;
       if (!db.objectStoreNames.contains('orders')) {
-        const s = db.createObjectStore('orders', { keyPath: 'id', autoIncrement: true });
-        s.createIndex('order_date', 'order_date');
-        s.createIndex('courier', 'courier');
-        s.createIndex('captured_at', 'captured_at');
+        orders = db.createObjectStore('orders', { keyPath: 'id', autoIncrement: true });
+        orders.createIndex('order_date', 'order_date');
+        orders.createIndex('courier', 'courier');
+        orders.createIndex('captured_at', 'captured_at');
+      } else {
+        orders = tx.objectStore('orders');
       }
       // drafts no longer live on disk; drop the old store if it exists
       if (db.objectStoreNames.contains('drafts')) db.deleteObjectStore('drafts');
       if (!db.objectStoreNames.contains('meta')) db.createObjectStore('meta', { keyPath: 'key' });
+
+      // unique awb_no — dedupe then create / recreate the index
+      if (orders && (event.oldVersion < 5 || !orders.indexNames.contains('awb_no'))) {
+        const req = orders.getAll();
+        req.onsuccess = () => {
+          const all = req.result || [];
+          const best = new Map();
+          for (const o of all) {
+            const awb = String(o.awb_no || '').trim();
+            if (!awb) continue;
+            const prev = best.get(awb);
+            if (!prev || Number(o.captured_at || 0) >= Number(prev.captured_at || 0)) best.set(awb, o);
+          }
+          for (const o of all) {
+            const awb = String(o.awb_no || '').trim();
+            if (!awb) continue;
+            const keep = best.get(awb);
+            if (keep && keep.id !== o.id) orders.delete(o.id);
+          }
+          if (orders.indexNames.contains('awb_no')) orders.deleteIndex('awb_no');
+          orders.createIndex('awb_no', 'awb_no', { unique: true });
+        };
+      }
     };
     r.onsuccess = () => resolve(r.result);
     r.onerror = () => reject(r.error);
@@ -47,6 +75,13 @@ async function idbGet(store, key) {
   const db = await openDB();
   return new Promise((res, rej) => {
     const r = db.transaction(store, 'readonly').objectStore(store).get(key);
+    r.onsuccess = () => res(r.result || null); r.onerror = () => rej(r.error);
+  });
+}
+async function idbGetByIndex(store, indexName, key) {
+  const db = await openDB();
+  return new Promise((res, rej) => {
+    const r = db.transaction(store, 'readonly').objectStore(store).index(indexName).get(key);
     r.onsuccess = () => res(r.result || null); r.onerror = () => rej(r.error);
   });
 }
@@ -83,6 +118,66 @@ async function idbClear(store) {
 }
 
 
+/** Find every saved order with this AWB (index first, then full scan fallback). */
+async function findOrdersByAwb(awb) {
+  const key = String(awb || '').trim();
+  if (!key) return [];
+  try {
+    const one = await idbGetByIndex('orders', 'awb_no', key);
+    if (one) return [one];
+  } catch { /* index may be missing on older DBs */ }
+  const all = await idbAll('orders');
+  return all.filter(o => String(o.awb_no || '').trim() === key);
+}
+
+/** Upsert by awb_no so Create Shipment / test submit never duplicates the same AWB. */
+async function upsertOrder(order) {
+  const awb = String(order.awb_no || '').trim();
+  if (awb) {
+    const matches = await findOrdersByAwb(awb);
+    if (matches.length) {
+      matches.sort((a, b) => Number(b.captured_at || 0) - Number(a.captured_at || 0));
+      const keep = matches[0];
+      for (const extra of matches.slice(1)) {
+        if (extra.id != null) await idbDelete('orders', extra.id);
+      }
+      const locked = { ...(keep._locked || {}), ...(order._locked || {}) };
+      const merged = { ...keep, ...order, id: keep.id, awb_no: awb, _locked: locked };
+      await idbPut('orders', merged);
+      return { upserted: true, id: keep.id };
+    }
+  }
+  const fresh = { ...order };
+  delete fresh.id;
+  if (awb) fresh.awb_no = awb;
+  await idbPut('orders', fresh);
+  return { upserted: false };
+}
+
+/** Remove any accidental duplicate AWB rows left from older builds. */
+async function dedupeOrdersByAwb() {
+  const all = await idbAll('orders');
+  const best = new Map();
+  for (const o of all) {
+    const awb = String(o.awb_no || '').trim();
+    if (!awb) continue;
+    const prev = best.get(awb);
+    if (!prev || Number(o.captured_at || 0) >= Number(prev.captured_at || 0)) best.set(awb, o);
+  }
+  let removed = 0;
+  for (const o of all) {
+    const awb = String(o.awb_no || '').trim();
+    if (!awb) continue;
+    const keep = best.get(awb);
+    if (keep && keep.id !== o.id) {
+      await idbDelete('orders', o.id);
+      removed++;
+    }
+  }
+  return removed;
+}
+
+
 /* ---------------- session drafts (memory only) ---------------- */
 
 async function draftGet(key) {
@@ -103,6 +198,71 @@ async function draftClear() {
   const all = await chrome.storage.session.get(null);
   const keys = Object.keys(all).filter(k => k.startsWith(DRAFT_NS));
   if (keys.length) await chrome.storage.session.remove(keys);
+}
+
+/* ---------------- API key + customer id resolve ---------------- */
+
+const SERVER_URL = 'https://server.hisaabsathi.in';
+
+async function getApiKey() {
+  const r = await chrome.storage.local.get({ apiKey: '' });
+  return String(r.apiKey || '').trim();
+}
+
+async function setApiKey(value) {
+  const next = String(value || '').trim();
+  if (!next) return getApiKey();
+  await chrome.storage.local.set({ apiKey: next });
+  return next;
+}
+
+function readErrorMessage(text) {
+  if (!text) return '';
+  try {
+    const body = JSON.parse(text);
+    return String(body?.error?.message || body?.message || '').trim();
+  } catch {
+    return text.slice(0, 160).trim();
+  }
+}
+
+async function resolveCustomerId(name) {
+  const trimmed = String(name || '').trim();
+  if (!trimmed) return { ok: false, customerId: null, error: 'empty name' };
+  const apiKey = await getApiKey();
+  if (!apiKey) return { ok: false, customerId: null, error: 'missing api key' };
+
+  try {
+    const url = new URL(`${SERVER_URL}/api/v1/orders/customer-id`);
+    url.searchParams.set('name', trimmed);
+
+    const res = await fetch(url.toString(), {
+      method: 'POST',
+      headers: {
+        Accept: 'application/json',
+        'X-Api-Key': apiKey,
+      },
+    });
+    const text = await res.text().catch(() => '');
+    if (!res.ok) {
+      const detail = readErrorMessage(text);
+      return {
+        ok: false,
+        customerId: null,
+        error: detail || `HTTP ${res.status}`,
+        status: res.status,
+      };
+    }
+    let body = null;
+    try { body = text ? JSON.parse(text) : null; } catch { body = null; }
+    const customerId = body?.data?.customerId ?? null;
+    if (customerId == null || String(customerId).trim() === '') {
+      return { ok: true, customerId: null };
+    }
+    return { ok: true, customerId: String(customerId).trim() };
+  } catch (e) {
+    return { ok: false, customerId: null, error: String(e?.message || e) };
+  }
 }
 
 /* ---------------- content script plumbing ---------------- */
@@ -160,6 +320,17 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     // live draft — memory only, never touches IndexedDB
     if (msg?.type === 'DRAFT_UPDATED' && tabId != null) {
       const key = sessionKey(tabId, msg.session_suffix);
+      const awb = String(msg.order?.awb_no || '').trim();
+      // Same AWB already saved → do not recreate a live row that looks like a duplicate
+      if (awb) {
+        const existingOrders = await findOrdersByAwb(awb);
+        if (existingOrders.length) {
+          await draftDelete(key);
+          notify({ type: 'DRAFT_UPDATED' });
+          sendResponse({ ok: true, suppressed: true });
+          return;
+        }
+      }
       const existing = await draftGet(key);
       const fields = Array.isArray(msg.captured_fields) ? msg.captured_fields : Object.keys(msg.order || {});
       const merged = mergeFields(existing, msg.order || {}, fields, msg.authoritative === true);
@@ -175,7 +346,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       return;
     }
 
-    // submitted — this is the only path that writes to IndexedDB
+    // submitted — only path that writes to IndexedDB; upsert by awb_no
     if (msg?.type === 'ORDER_CAPTURED' && tabId != null) {
       const key = sessionKey(tabId, msg.session_suffix);
       const existing = await draftGet(key);
@@ -187,12 +358,11 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       order.status = 'complete';
       order.order_date = order.order_date || new Date().toISOString().slice(0, 10);
       order.captured_at = Date.now();
-      delete order.id;
-      await idbPut('orders', order);
+      const result = await upsertOrder(order);
       await draftDelete(key);
       notify({ type: 'ORDER_CAPTURED' });
       chrome.tabs.sendMessage(tabId, { type: 'RESET_ORDER_SESSION' }).catch(() => { });
-      sendResponse({ ok: true });
+      sendResponse({ ok: true, ...result });
       return;
     }
 
@@ -211,13 +381,38 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     }
 
     if (msg?.type === 'GET_DATA') {
+      await dedupeOrdersByAwb().catch(() => 0);
       const [orders, drafts] = await Promise.all([idbAll('orders'), draftAll()]);
+      const apiKey = await getApiKey();
       sendResponse({
         ok: true,
         orders,
         drafts,
-        enabled: (await chrome.storage.local.get(DEFAULT_SETTINGS)).enabled !== false
+        enabled: (await chrome.storage.local.get(DEFAULT_SETTINGS)).enabled !== false,
+        hasApiKey: !!apiKey
       });
+      return;
+    }
+
+    if (msg?.type === 'GET_API_KEY') {
+      const apiKey = await getApiKey();
+      sendResponse({ ok: true, apiKey, hasApiKey: !!apiKey });
+      return;
+    }
+
+    if (msg?.type === 'SET_API_KEY') {
+      const apiKey = await setApiKey(msg.apiKey);
+      sendResponse({ ok: true, apiKey, hasApiKey: !!apiKey });
+      return;
+    }
+
+    if (msg?.type === 'RESOLVE_CUSTOMER_ID') {
+      try {
+        const result = await resolveCustomerId(msg.name);
+        sendResponse(result);
+      } catch (e) {
+        sendResponse({ ok: false, customerId: null, error: String(e?.message || e) });
+      }
       return;
     }
 
@@ -232,7 +427,18 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
     if (msg?.type === 'EDIT_DRAFT') {
       const d = await draftGet(msg.session_key);
-      if (d) { d[msg.key] = msg.value; d._locked = { ...(d._locked || {}), [msg.key]: true }; d.updated_at = Date.now(); await draftPut(msg.session_key, d); }
+      if (d) {
+        d[msg.key] = msg.value;
+        if (msg.lock !== false) {
+          d._locked = { ...(d._locked || {}), [msg.key]: true };
+        } else if (msg.key === 'client_id') {
+          const locked = { ...(d._locked || {}) };
+          delete locked.client_id;
+          d._locked = locked;
+        }
+        d.updated_at = Date.now();
+        await draftPut(msg.session_key, d);
+      }
       sendResponse({ ok: true }); return;
     }
     if (msg?.type === 'EDIT_ORDER') {

@@ -3,6 +3,7 @@
    Also an antd app; IDs here are plain and unprefixed.
    clientName / shipmentType / service / travelBy are antd selects — their
    value lives in .ant-select-selection-item, not in the input. */
+/** biome-ignore-all lint/complexity/useArrowFunction: ignore */
 (function () {
 
   const SEL = {
@@ -48,7 +49,7 @@
   const filled = o => CAPTURED.some(k => o[k] !== '' && o[k] !== null && o[k] !== undefined);
   const sig = o => JSON.stringify(CAPTURED.map(k => o[k]));
 
-  let submitted = false, finalized = false, lastSig = '';
+  let submitted = false, finalized = false, lastSig = '', lastCapturedAwb = '';
 
   async function push() {
     if (finalized) return;
@@ -58,6 +59,13 @@
     if (!HS.formReady(ANCHOR)) return;
 
     const o = read();
+
+    // After a successful capture, stay quiet while the same AWB is still on
+    // the form so we don't recreate a live row next to the saved one.
+    if (lastCapturedAwb) {
+      if (o.awb_no && o.awb_no !== lastCapturedAwb) lastCapturedAwb = '';
+      else if (!o.awb_no || o.awb_no === lastCapturedAwb) return;
+    }
 
     // Before the first real input, stay quiet so a freshly loaded page
     // doesn't create an empty row.
@@ -80,6 +88,7 @@
     const o = read();
     if (!o.awb_no) return;
     finalized = true;
+    lastCapturedAwb = o.awb_no;
     await HS.capture(o, true, CAPTURED, 'SHREE MARUTI', true);
   }
 
@@ -95,7 +104,7 @@
   }
 
   HS.onControl(mode => {
-    if (mode === 'RESET') { submitted = false; finalized = false; lastSig = ''; armed = false; return; }
+    if (mode === 'RESET') { submitted = false; finalized = false; lastSig = ''; lastCapturedAwb = ''; armed = false; return; }
     if (mode === 'TEST_SUBMIT') {
       const o = read();
       if (!o.awb_no) return { ok: false, reason: 'no awb on the form yet' };

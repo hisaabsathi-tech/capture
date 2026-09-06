@@ -255,7 +255,11 @@ async function resolveCustomerId(name) {
     }
     let body = null;
     try { body = text ? JSON.parse(text) : null; } catch { body = null; }
-    const customerId = body?.data?.customerId ?? null;
+    const customerId = body?.data?.customerId
+      ?? body?.data?.customer_id
+      ?? body?.customerId
+      ?? body?.customer_id
+      ?? null;
     if (customerId == null || String(customerId).trim() === '') {
       return { ok: true, customerId: null };
     }
@@ -307,6 +311,25 @@ function mergeFields(existing, incoming, fields, authoritative) {
   return out;
 }
 const notify = msg => chrome.runtime.sendMessage(msg).catch(() => { });
+const autoClientIds = new Map();
+
+function rememberAutoClientId(sessionKey, name, customerId) {
+  const n = String(name || '').trim();
+  const id = String(customerId || '').trim();
+  if (!sessionKey) return;
+  if (!n || !id) { autoClientIds.delete(sessionKey); return; }
+  autoClientIds.set(sessionKey, { name: n, customerId: id });
+}
+
+function applyAutoClientId(row, sessionKey) {
+  if (!row) return row;
+  const saved = autoClientIds.get(sessionKey);
+  if (!saved) return row;
+  const name = String(row.client_name || '').trim();
+  if (name && name === saved.name && saved.customerId) row.client_id = saved.customerId;
+  else if (name && name !== saved.name) autoClientIds.delete(sessionKey);
+  return row;
+}
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   (async () => {
@@ -340,6 +363,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       merged.status = 'draft';
       merged.order_date = merged.order_date || new Date().toISOString().slice(0, 10);
       merged.updated_at = Date.now();
+      applyAutoClientId(merged, key);
       await draftPut(key, merged);
       notify({ type: 'DRAFT_UPDATED' });
       sendResponse({ ok: true });
@@ -358,6 +382,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       order.status = 'complete';
       order.order_date = order.order_date || new Date().toISOString().slice(0, 10);
       order.captured_at = Date.now();
+      applyAutoClientId(order, key);
       const result = await upsertOrder(order);
       await draftDelete(key);
       notify({ type: 'ORDER_CAPTURED' });
@@ -384,6 +409,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       await dedupeOrdersByAwb().catch(() => 0);
       const [orders, drafts] = await Promise.all([idbAll('orders'), draftAll()]);
       const apiKey = await getApiKey();
+      for (const d of drafts) applyAutoClientId(d, d.session_key);
       sendResponse({
         ok: true,
         orders,
@@ -435,6 +461,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           const locked = { ...(d._locked || {}) };
           delete locked.client_id;
           d._locked = locked;
+        }
+        if (msg.key === 'client_id') rememberAutoClientId(msg.session_key, d.client_name, msg.value);
+        if (msg.key === 'client_name' && String(msg.value || '').trim() !== String(autoClientIds.get(msg.session_key)?.name || '')) {
+          autoClientIds.delete(msg.session_key);
         }
         d.updated_at = Date.now();
         await draftPut(msg.session_key, d);

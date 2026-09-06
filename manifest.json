@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
-  "name": "Hisaabsathi Capture",
-  "short_name": "Hisaabsathi Capture",
+  "name": "HisaabSathi Capture",
+  "short_name": "HisaabSathi Capture",
   "version": "0.9.3",
   "description": "Real-time Ekart and Shree Maruti shipment capture for HisaabSathi.",
   "permissions": [
@@ -24,7 +24,7 @@
     "service_worker": "background.js"
   },
   "action": {
-    "default_title": "Open Hisaabsathi Capture",
+    "default_title": "Open HisaabSathi Capture",
     "default_icon": {
       "16": "icons/icon16.png",
       "32": "icons/icon32.png",

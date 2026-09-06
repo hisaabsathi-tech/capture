@@ -1,4 +1,4 @@
-# HisaabSathi Capture
+# Hisaabsathi Capture
 
 Chrome extension that copies shipment fields from Ekart and Shree Maruti booking pages into a side-panel sheet, then exports them as Excel.
 

@@ -1,4 +1,4 @@
-/* HisaabSathi Capture — background service worker
+/* Hisaabsathi Capture — background service worker
    Storage model:
      drafts  -> chrome.storage.session  (in-memory, never written to disk;
                                           gone on browser close or page refresh)

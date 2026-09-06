@@ -1,4 +1,4 @@
-/* HisaabSathi side panel
+/* Hisaabsathi Capture side panel
    brand blue #465FFF and navy #161950 sampled from the logo
    Outfit variable (100–900) from Google Fonts */
 /** biome-ignore-all lint/style/noDescendingSpecificity: ignore */
@@ -303,4 +303,3 @@ footer{
 .switch{position:relative;top:auto;right:auto;width:36px;height:20px;flex:0 0 36px}
 
 .sub{font-size:9px;color:var(--muted);margin-top:3px;text-transform:uppercase;letter-spacing:.4px}
-

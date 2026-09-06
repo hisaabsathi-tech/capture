@@ -12,9 +12,13 @@ const DB_NAME = 'hisaabsathi-db';
 const DB_VERSION = 5;
 const DRAFT_NS = 'draft:';
 
+function courierFor(url = '') {
+  if (url.startsWith('https://app.elite.ekartlogistics.in/ship/forward')) return 'EKART';
+  if (url.startsWith('https://bookings.innofulfill.com/credit-booking')) return 'SHREE MARUTI';
+  return '';
+}
 function supported(url = '') {
-  return url.startsWith('https://app.elite.ekartlogistics.in/ship/forward')
-      || url.startsWith('https://bookings.innofulfill.com/credit-booking');
+  return !!courierFor(url);
 }
 function filesFor(url = '') {
   if (url.startsWith('https://app.elite.ekartlogistics.in/ship/forward')) return ['lib/common.js', 'adapters/ekart.js'];
@@ -278,10 +282,11 @@ async function ensureContentScript(tabId, url) {
   if (!files.length) return false;
   try { await chrome.scripting.executeScript({ target: { tabId }, files }); return true; } catch { return false; }
 }
+// The panel stays enabled on every tab — it explains itself when the page is
+// not a courier booking form, which beats an action button that does nothing.
 async function configureTab(tabId, url) {
-  const ok = supported(url);
-  await chrome.sidePanel.setOptions({ tabId, path: 'sidepanel.html', enabled: ok }).catch(() => { });
-  if (ok) await ensureContentScript(tabId, url);
+  await chrome.sidePanel.setOptions({ tabId, path: 'sidepanel.html', enabled: true }).catch(() => { });
+  if (supported(url)) await ensureContentScript(tabId, url);
 }
 
 function enableActionOpensPanel() {
@@ -488,6 +493,15 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     if (msg?.type === 'GET_CURRENT_TAB') {
       const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
       sendResponse({ ok: true, tab: tabs[0] || null }); return;
+    }
+
+    // the panel asks this on every tab switch / navigation so it can show
+    // whether capture is live on the page in front of the user. The URL rules
+    // live here only, so the panel never has to match them a second time.
+    if (msg?.type === 'CLASSIFY_URL') {
+      const url = String(msg.url || '');
+      sendResponse({ ok: true, supported: supported(url), courier: courierFor(url) });
+      return;
     }
 
     sendResponse({ ok: true });

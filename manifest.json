@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Hisaabsathi Capture",
   "short_name": "Hisaabsathi Capture",
-  "version": "0.9.1",
+  "version": "0.9.3",
   "description": "Real-time Ekart and Shree Maruti shipment capture for HisaabSathi.",
   "permissions": [
     "storage",

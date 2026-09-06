@@ -46,7 +46,11 @@
   const ANCHOR = { sel: '#documentNumber', label: 'Document Number' };
   let armed = false;          // becomes true once the user has typed anything
 
-  const filled = o => CAPTURED.some(k => o[k] !== '' && o[k] !== null && o[k] !== undefined);
+  // volumetric_wt is always 0 here, so it can never be evidence that the user
+  // started booking — a freshly loaded page would otherwise arm on it alone.
+  const ARM_KEYS = CAPTURED.filter(k => k !== 'volumetric_wt');
+
+  const filled = o => ARM_KEYS.some(k => o[k] !== '' && o[k] !== null && o[k] !== undefined);
   const sig = o => JSON.stringify(CAPTURED.map(k => o[k]));
 
   let submitted = false, finalized = false, lastSig = '', lastCapturedAwb = '';
@@ -92,7 +96,6 @@
     await HS.capture(o, true, CAPTURED, 'SHREE MARUTI', true);
   }
 
-  // one submit path, shared by the real button and the test button
   async function doSubmit() {
     submitted = true;
     await push();
@@ -104,13 +107,7 @@
   }
 
   HS.onControl(mode => {
-    if (mode === 'RESET') { submitted = false; finalized = false; lastSig = ''; lastCapturedAwb = ''; armed = false; return; }
-    if (mode === 'TEST_SUBMIT') {
-      const o = read();
-      if (!o.awb_no) return { ok: false, reason: 'no awb on the form yet' };
-      doSubmit();
-      return { ok: true };
-    }
+    if (mode === 'RESET') { submitted = false; finalized = false; lastSig = ''; lastCapturedAwb = ''; armed = false; }
   });
 
   // Page load or refresh: the courier form is empty, so drop the stale draft.

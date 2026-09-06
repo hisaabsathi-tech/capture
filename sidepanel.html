@@ -7,7 +7,6 @@
   <div class="brand">
     <img class="brand-logo" src="assets-logo.png" alt="HisaabSathi">
     <span class="brand-divider"></span>
-    <img id="courierLogo" class="courier-logo" alt="" hidden>
     <span id="courierBadge" class="courier-badge" hidden></span>
   </div>
   <div class="header-actions">
@@ -16,6 +15,15 @@
 </header>
 
 <main>
+  <div id="unsupported" class="notice" hidden>
+    <div class="notice-title">not saving on this page</div>
+    <p class="notice-body">This page is not Ekart or Shree Maruti. So nothing is being saved right now. Your old rows are safe. You can still fix them and download the excel.</p>
+    <div class="notice-links">
+      <button type="button" class="link" data-open="https://app.elite.ekartlogistics.in/ship/forward">open ekart</button>
+      <button type="button" class="link" data-open="https://bookings.innofulfill.com/credit-booking">open shree maruti</button>
+    </div>
+  </div>
+
   <div class="sheet-head">
     <div class="title">orders</div>
   </div>
@@ -29,7 +37,6 @@
       <option value="EKART">ekart</option>
       <option value="SHREE MARUTI">shree maruti</option>
     </select>
-    <button type="button" id="testSubmit" class="ghost" title="TEST ONLY — finalises the current live row without booking a real shipment">test create shipment</button>
     <button type="button" id="download" class="primary">download excel <span class="material-symbols-outlined" aria-hidden="true">download</span></button>
   </div>
 </footer>

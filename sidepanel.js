@@ -4,10 +4,10 @@ const COLS=['*Sl NO','*ORDER DATE','*AWB NO','CLIENT NAME','*CLIENT ID','*DESTIN
 const HEADERS=COLS.map(x=>x.replace(/^\*/,''));
 const KEYS=['sl_no','order_date','awb_no','client_name','client_id','destination_pincode','service_channel','service_type','package_type','travel_mode','volumetric_wt','actual_wt','product_value','awb_charge','orc_charge','crc_charge','fov_charge','oda_charge','insurance_charge','packing_charge','handling_charge','payment_type','cod_charge','to_pay_amount'];
 const MANUAL_COMMON=new Set(['client_id','to_pay_amount']);
-function isManual(k,raw){const c=cleanCourier(raw?.courier||raw?.service_channel);if(MANUAL_COMMON.has(k))return true;if(c==='EKART')return ['service_type','package_type','travel_mode'].includes(k);if(c==='SHREE MARUTI')return ['payment_type','cod_charge'].includes(k);return true;}
+function isManual(k,raw){const c=cleanCourier(raw?.courier||raw?.service_channel);if(MANUAL_COMMON.has(k))return true;if(c==='EKART')return ['package_type','travel_mode'].includes(k);if(c==='SHREE MARUTI')return ['payment_type','cod_charge'].includes(k);return true;}
 const REQUIRED=new Set(['client_id','destination_pincode','service_type','package_type','travel_mode']);
 const DEBOUNCE=120;
-const state={orders:[],drafts:[],enabled:true,hasApiKey:false,tabId:null,channelPinned:false,focus:{session_key:'',field:''}};
+const state={orders:[],drafts:[],enabled:true,hasApiKey:false,tabId:null,supported:false,courier:'',channelPinned:false,focus:{session_key:'',field:''}};
 const customerLookupTimers=new Map();
 const customerLookupInFlight=new Set();
 const customerLookupAttempted=new Map();
@@ -39,12 +39,21 @@ async function resolveCustomerForRow(isDraft,raw,name){if(!state.hasApiKey)retur
 function queueReloadFromDraft(){clearTimeout(reloadDraftTimer);reloadDraftTimer=setTimeout(()=>reloadData().catch(()=>{}),80);}
 function canonical(o,index){return {sl_no:index+1,order_date:o.order_date||today(),awb_no:o.awb_no||'',client_name:o.client_name||'',client_id:o.client_id||'',destination_pincode:o.destination_pincode||'',service_channel:cleanCourier(o.courier||o.service_channel),service_type:o.service_type||'',package_type:o.package_type||'',travel_mode:o.travel_mode||'',volumetric_wt:o.volumetric_wt??'',actual_wt:o.actual_wt??'',product_value:o.product_value??'',awb_charge:o.awb_charge||'',orc_charge:o.orc_charge||'',crc_charge:o.crc_charge||'',fov_charge:o.fov_charge||'',oda_charge:o.oda_charge||'',insurance_charge:o.insurance_charge||'',packing_charge:o.packing_charge||'',handling_charge:o.handling_charge||'',payment_type:o.payment_type||'',cod_charge:o.cod_charge??'',to_pay_amount:''}};
 async function load(){const d=await getData();state.enabled=d.enabled!==false;state.hasApiKey=!!d.hasApiKey;state.orders=d.orders||[];state.drafts=d.drafts||[];document.querySelector('#enabled').checked=state.enabled;await refreshTab();await refreshCourier();render();}
-const COURIER={'app.elite.ekartlogistics.in':{name:'EKART',file:'assets/ekart.png'},'bookings.innofulfill.com':{name:'SHREE MARUTI',file:'assets/shree-maruti.png'}};
-async function refreshCourier(){const tabs=await chrome.tabs.query({active:true,currentWindow:true});let host='';try{host=new URL(tabs[0]?.url||'').hostname;}catch{}
- const c=COURIER[host];const img=document.querySelector('#courierLogo'),badge=document.querySelector('#courierBadge');
- if(!c){img.hidden=true;badge.hidden=true;return;}
- badge.textContent=c.name;badge.hidden=false;img.hidden=true;if(!state.channelPinned){const f=document.querySelector('#channelFilter');if(f&&f.value!==c.name){f.value=c.name;render();}}
- const probe=new Image();probe.onload=()=>{img.src=c.file;img.hidden=false;badge.hidden=true;};probe.src=c.file;}
+/* Which courier the tab in front of the user is on. background.js owns the
+   URL rules, so the panel asks rather than matching them a second time. */
+async function refreshCourier(){
+ const tabs=await chrome.tabs.query({active:true,currentWindow:true});
+ state.tabId=tabs[0]?.id??null;
+ const r=await runtimeSend({type:'CLASSIFY_URL',url:tabs[0]?.url||''});
+ state.supported=!!r?.supported;
+ state.courier=r?.courier||'';
+ const badge=document.querySelector('#courierBadge'),notice=document.querySelector('#unsupported');
+ badge.textContent=state.supported?state.courier:'not supported';
+ badge.classList.toggle('is-idle',!state.supported);
+ badge.hidden=false;
+ notice.hidden=state.supported;
+ if(state.supported&&!state.channelPinned){const f=document.querySelector('#channelFilter');if(f&&f.value!==state.courier){f.value=state.courier;render();}}
+}
 async function refreshTab(){const tabs=await chrome.tabs.query({active:true,currentWindow:true});state.tabId=tabs[0]?.id??null;}
 function applyFocusHighlight(){document.querySelectorAll('#sheet .cell-focus').forEach(e=>{e.classList.remove('cell-focus')});document.querySelectorAll('#sheet tr.row-focus').forEach(e=>{e.classList.remove('row-focus')});const {session_key,field}=state.focus;if(!session_key||!field)return;let el=null;try{el=document.querySelector(`input[data-cell="${CSS.escape(session_key+'|'+field)}"]`);}catch{}if(!el)return;el.classList.add('cell-focus');const tr=el.closest('tr');if(tr)tr.classList.add('row-focus');if(document.activeElement!==el)el.scrollIntoView({behavior:'smooth',block:'nearest',inline:'center'});}
 function setFocusField(session_key,field){state.focus={session_key:session_key||'',field:field||''};applyFocusHighlight();}
@@ -92,6 +101,6 @@ document.querySelector('#settingsSave').onclick=()=>saveApiToken().catch(()=>toa
 document.querySelector('#apiTokenToggle').onclick=toggleApiTokenVisibility;
 document.querySelector('#settingsDialog .settings-backdrop').onclick=closeSettingsDialog;
 document.querySelector('#apiTokenInput').addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();saveApiToken().catch(()=>toast('COULD NOT SAVE API TOKEN'));}});
-document.querySelector('#testSubmit').onclick=async()=>{const tabs=await chrome.tabs.query({active:true,currentWindow:true});const id=tabs[0]?.id;if(!id){toast('NO ACTIVE TAB');return;}let r=null;try{r=await chrome.tabs.sendMessage(id,{type:'TEST_SUBMIT'});}catch{}if(!r){toast('OPEN A COURIER BOOKING PAGE FIRST');return;}if(r.ok===false){toast(`CANNOT SUBMIT — ${String(r.reason||'').toUpperCase()}`);return;}toast('TEST SHIPMENT SUBMITTED');};
 document.querySelector('#channelFilter').addEventListener('change',()=>{state.channelPinned=true;render();});
+document.querySelectorAll('#unsupported [data-open]').forEach(b=>{b.onclick=()=>chrome.tabs.create({url:b.dataset.open});});
 load().catch(()=>toast('FAILED TO LOAD LOCAL DATA'));

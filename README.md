@@ -24,3 +24,5 @@ Chrome extension that copies shipment fields from Ekart and Shree Maruti booking
 In-progress rows stay in memory only (they disappear if you close the tab or the browser). Saved rows stay until you download or delete them. Download clears the exported rows — the spreadsheet is the record.
 
 The toggle in the header turns capture on or off. Some columns (client ID, and a few courier-specific fields) are filled by hand.
+
+The panel opens on any page. On anything other than the two booking pages above it says capture is idle, and the header chip reads **not supported** — your saved rows stay editable and downloadable.

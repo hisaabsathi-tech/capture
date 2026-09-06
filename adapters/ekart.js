@@ -18,13 +18,29 @@
     _height:             { sel: '[id$="_package_0_height"]', label: 'Height' }
   };
 
+  // Service Type is a radio group ("How do you want to ship your order ?"),
+  // not an input, so it is read separately — see HS.radio.
+  const RADIO = {
+    service_type: {
+      sel: '[id="shipment_mode"], [id$="_shipment_mode"]',
+      label: 'How do you want to ship your order ?',
+      options: ['Express', 'Surface']
+    }
+  };
+
   // Only these keys are written back to the sheet. Everything else on the
-  // Ekart form (Service Type, Package Type, Travel Mode) does not exist,
-  // so it stays blank and manually editable.
+  // Ekart form (Package Type, Travel Mode) does not exist, so it stays blank
+  // and manually editable.
   const CAPTURED = [
-    'awb_no', 'client_name', 'destination_pincode',
+    'awb_no', 'client_name', 'destination_pincode', 'service_type',
     'actual_wt', 'product_value', 'payment_type', 'cod_charge', 'volumetric_wt'
   ];
+
+  // Evidence that the user has actually started booking. service_type comes
+  // from a radio group that ships with a default selection and volumetric_wt
+  // falls back to 0, so neither counts — a freshly loaded page would arm on
+  // them alone and create an empty row.
+  const ARM_KEYS = CAPTURED.filter(k => k !== 'service_type' && k !== 'volumetric_wt');
 
 
   function read() {
@@ -36,6 +52,7 @@
       awb_no:              raw.awb_no,
       client_name:         raw.client_name,
       destination_pincode: raw.destination_pincode,
+      service_type:        HS.radio(RADIO.service_type),  // Express / Surface
       actual_wt:           HS.num(raw.actual_wt),      // grams
       product_value:       HS.num(raw.product_value),
       payment_type:        payment,
@@ -47,7 +64,7 @@
   const ANCHOR = { sel: '[id="order_number"], [id$="_order_number"]', label: 'Order Number' };
   let armed = false;          // becomes true once the user has typed anything
 
-  const filled = o => CAPTURED.some(k => o[k] !== '' && o[k] !== null && o[k] !== undefined);
+  const filled = o => ARM_KEYS.some(k => o[k] !== '' && o[k] !== null && o[k] !== undefined);
   const sig = o => JSON.stringify(CAPTURED.map(k => o[k]));
 
   let submitted = false, finalized = false, lastSig = '', lastCapturedAwb = '';
@@ -93,7 +110,6 @@
     await HS.capture(o, true, CAPTURED, 'EKART', true);
   }
 
-  // one submit path, shared by the real button and the test button
   async function doSubmit() {
     submitted = true;
     await push();
@@ -105,13 +121,7 @@
   }
 
   HS.onControl(mode => {
-    if (mode === 'RESET') { submitted = false; finalized = false; lastSig = ''; lastCapturedAwb = ''; armed = false; return; }
-    if (mode === 'TEST_SUBMIT') {
-      const o = read();
-      if (!o.awb_no) return { ok: false, reason: 'no awb on the form yet' };
-      doSubmit();
-      return { ok: true };
-    }
+    if (mode === 'RESET') { submitted = false; finalized = false; lastSig = ''; lastCapturedAwb = ''; armed = false; }
   });
 
   // Page load or refresh: the courier form is empty, so drop the stale draft.

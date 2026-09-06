@@ -1,0 +1,81 @@
+name: Release Chrome Extension
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_type:
+        description: "What to do"
+        required: true
+        default: "draft-release"
+        type: choice
+        options:
+          - draft-release
+          - build-only
+      version:
+        description: "Release version, for example 1.0.0. Required for draft-release."
+        required: false
+        type: string
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  package:
+    name: Package extension
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Apply manual release version
+        if: github.event_name == 'workflow_dispatch' && github.event.inputs.release_type == 'draft-release'
+        run: |
+          if [ -z "${{ github.event.inputs.version }}" ]; then
+            echo "version input is required for draft-release" >&2
+            exit 1
+          fi
+          node scripts/release-version.js set "${{ github.event.inputs.version }}"
+
+      - name: Validate tag version
+        if: github.event_name == 'push'
+        run: |
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          MANIFEST_VERSION="$(node scripts/release-version.js current)"
+          if [ "${TAG_VERSION}" != "${MANIFEST_VERSION}" ]; then
+            echo "Tag version ${TAG_VERSION} does not match manifest version ${MANIFEST_VERSION}" >&2
+            exit 1
+          fi
+
+      - name: Build ZIP
+        id: build
+        run: |
+          ZIP_PATH="$(bash scripts/build-zip.sh)"
+          VERSION="$(node scripts/release-version.js current)"
+          echo "zip_path=${ZIP_PATH}" >> "${GITHUB_OUTPUT}"
+          echo "version=${VERSION}" >> "${GITHUB_OUTPUT}"
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Hisaabsathi Capture v${{ steps.build.outputs.version }}
+          path: ${{ steps.build.outputs.zip_path }}
+          if-no-files-found: error
+
+      - name: Create GitHub Release
+        if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.event.inputs.release_type == 'draft-release')
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.build.outputs.version }}
+          name: Hisaabsathi Capture v${{ steps.build.outputs.version }}
+          files: ${{ steps.build.outputs.zip_path }}
+          draft: ${{ github.event_name == 'workflow_dispatch' }}
+          generate_release_notes: true

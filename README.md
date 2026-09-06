@@ -13,6 +13,16 @@ Chrome extension that copies shipment fields from Ekart and Shree Maruti booking
 2. Turn on **Developer mode**
 3. Click **Load unpacked** and select this folder
 
+## Release ZIP
+
+Build a clean extension ZIP locally:
+
+```bash
+npm run build:zip
+```
+
+Release steps are documented in [docs/releasing.md](docs/releasing.md).
+
 ## Use
 
 1. Open a supported booking page

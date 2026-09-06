@@ -1,0 +1,18 @@
+{
+  "name": "hisaabsathi-capture",
+  "private": true,
+  "version": "0.9.3",
+  "displayName": "Hisaabsathi Capture",
+  "description": "Chrome extension release tooling for Hisaabsathi Capture.",
+  "scripts": {
+    "build:zip": "bash scripts/build-zip.sh",
+    "version:show": "node scripts/release-version.js current",
+    "version:patch": "node scripts/release-version.js bump patch",
+    "version:minor": "node scripts/release-version.js bump minor",
+    "version:major": "node scripts/release-version.js bump major",
+    "version:set": "node scripts/release-version.js set"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

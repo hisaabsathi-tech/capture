@@ -6,13 +6,14 @@ on:
       release_type:
         description: "What to do"
         required: true
-        default: "draft-release"
+        default: "published-release"
         type: choice
         options:
+          - published-release
           - draft-release
           - build-only
       version:
-        description: "Release version, for example 1.0.0. Required for draft-release."
+        description: "Release version, for example 1.0.0. Required for published-release and draft-release."
         required: false
         type: string
   push:
@@ -37,10 +38,10 @@ jobs:
           node-version: 20
 
       - name: Apply manual release version
-        if: github.event_name == 'workflow_dispatch' && github.event.inputs.release_type == 'draft-release'
+        if: github.event_name == 'workflow_dispatch' && github.event.inputs.release_type != 'build-only'
         run: |
           if [ -z "${{ github.event.inputs.version }}" ]; then
-            echo "version input is required for draft-release" >&2
+            echo "version input is required for a GitHub Release" >&2
             exit 1
           fi
           node scripts/release-version.js set "${{ github.event.inputs.version }}"
@@ -71,11 +72,11 @@ jobs:
           if-no-files-found: error
 
       - name: Create GitHub Release
-        if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.event.inputs.release_type == 'draft-release')
+        if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.event.inputs.release_type != 'build-only')
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ steps.build.outputs.version }}
           name: Hisaabsathi Capture v${{ steps.build.outputs.version }}
           files: ${{ steps.build.outputs.zip_path }}
-          draft: ${{ github.event_name == 'workflow_dispatch' }}
+          draft: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.release_type == 'draft-release' }}
           generate_release_notes: true

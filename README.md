@@ -21,6 +21,8 @@ Build a clean extension ZIP locally:
 npm run build:zip
 ```
 
+To show the ZIP on GitHub, run the **Release Chrome Extension** workflow with `published-release`.
+
 Release steps are documented in [docs/releasing.md](docs/releasing.md).
 
 ## Use

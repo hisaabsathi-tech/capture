@@ -24,6 +24,16 @@ npm run build:zip
 
 In GitHub, run **Actions > Release Chrome Extension > Run workflow** and choose `build-only`. The ZIP will be available from the workflow run artifacts, but no GitHub Release is created.
 
+## Show the ZIP on GitHub Releases
+
+Use this when you want the ZIP visible on the repo's **Releases** page.
+
+1. Open **Actions > Release Chrome Extension > Run workflow**.
+2. Choose `published-release`.
+3. Enter the new numeric version, for example `1.0.0`.
+4. Open **Releases** in the GitHub repo.
+5. Download `Hisaabsathi Capture v1.0.0.zip` from the release assets.
+
 ## Release a new version
 
 Chrome extension versions must be numeric, with 1 to 4 parts, such as `1.0.0`.
